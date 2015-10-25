@@ -21,15 +21,17 @@
 
 #define Dst &state
 #define MAX_NESTING 256
+#define MAX_LENGTH  65536
 
 int clear_loop(char *p);
 int only_loop(char *p);
 int check_operator(char *p);
 int count(char *p);
-int loop(char *p,int end);
 int blank_loop(char *p);
+int scan_loop(char *p);
+int mul_loop(char *p,int value);
 
-dasm_State *state;
+static dasm_State *state;
 
 int main(int argc, char *argv[])
 {
@@ -41,6 +43,7 @@ int main(int argc, char *argv[])
 	int pcstack[MAX_NESTING];
 	int *top = pcstack, *limit = pcstack + MAX_NESTING;
 	int value;
+	
 
 	// Function prologue.
 	|  push PTR
@@ -60,7 +63,7 @@ int main(int argc, char *argv[])
                                  p++;
                          }
                          p--;
-                         | add PTR,value
+	                     | add PTR,value
 			break;
 		case '+':
 		case '-':
@@ -91,7 +94,13 @@ int main(int argc, char *argv[])
 				p+=2;	
 			}
 			else if(blank_loop(p))
-				p+=1;
+				p+=1;	
+			else if ((value=only_loop(p))&&check_operator(p)&&!scan_loop(p))
+			{
+				p++;
+				mul_loop(p,value);
+				p+=value;
+			}
 			else
 			{
 			if (top == limit) err("Nesting too deep.");
@@ -142,3 +151,143 @@ int blank_loop(char *p)
 		
 	return 0;
 }
+
+int only_loop(char *p)
+{	
+	int num = 0;
+	p++;
+	while(*p!=']')
+	{
+		if(*p=='[')
+			return 0;
+		num++;
+		p++;
+	}
+	return num;	
+}
+
+int check_operator(char *p)
+{
+
+	int right=0,left=0;
+	
+	while(*(++p)!=']')
+	{
+		if(*p=='.'||*p==',')
+			return 0;
+		if(*p=='>')
+			right++;
+		if(*p=='<')
+			left++;
+	}
+	
+	if(right==left)
+		return 1;
+	else
+		return 0;
+}
+int count(char *p)
+{
+	char tmp=*p;
+	int num=1;
+	
+	while(*(++p)==tmp)
+		num++;
+		
+	return num;
+}
+int scan_loop(char *p)
+{
+	char ch = *(p+1);
+	
+	while(*(++p)!=']')
+	{
+		if(*p!=ch)
+			return 0;
+	}
+	return 1;
+}
+
+int mul_loop(char *p,int value)
+{
+
+	int poi=0,cnt;
+	int x[30000]={0},val[30000]={0},deno=0,j=0;
+
+	while(*p!=']')
+	{
+		switch(*p)
+		{						
+			case '>':
+				cnt=count(p);
+				poi += cnt;
+				p+=cnt;
+				break;
+				
+			case '<':
+				cnt=count(p);
+				poi -= cnt;
+				p+=cnt;
+				break;
+				
+			case '+':
+				cnt=count(p);
+				if(poi)
+				{			
+					x[j]=poi;
+					val[j]+=cnt;
+					j++;
+				}
+				else
+					deno+=cnt;
+				p+=cnt;					
+				break;
+	
+			case '-':
+				cnt=count(p);
+				if(poi)
+				{
+					x[j]=poi;
+					val[j]-=cnt;
+					j++;
+				}
+				else 
+					deno-=cnt;
+				p+=cnt;
+				break;
+
+			default:
+				p++;
+				break;
+		}
+		
+	}
+	
+	deno *=-1;
+	
+		|  mov al,byte [PTR]
+		
+	if(deno!=1)
+	{
+		|  cbw
+		|  mov cl,deno
+		|  idiv cl
+	}	
+		for(int i=0;i<j;i++)
+		{	
+			if(val[i]>0)
+				for(int k=0;k<val[i];k++)
+					|  add byte [PTR+x[i]],al
+			else
+			{
+				val[i]*=-1;
+				for(int k=0;k<val[i];k++)
+					|  sub byte [PTR+x[i]],al
+			
+			}
+		}
+	|  mov byte [PTR],0
+				
+	return 0;
+}
+
